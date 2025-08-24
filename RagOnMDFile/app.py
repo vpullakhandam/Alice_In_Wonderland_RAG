@@ -115,16 +115,33 @@ def get_reranker():
         return None
     try:
         import torch
-        # Force CPU to avoid CUDA/meta tensor issues
+        from transformers import AutoModel
+        
+        # Force CPU and disable gradients
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         torch.set_grad_enabled(False)
         
+        # Initialize model with empty weights first
+        with torch.device('meta'):
+            meta_model = AutoModel.from_pretrained(
+                "BAAI/bge-reranker-base",
+                torch_dtype=torch.float32,
+                trust_remote_code=True
+            )
+        
+        # Move to CPU and materialize weights
+        model = meta_model.to_empty(device='cpu')
+        model.load_state_dict(meta_model.state_dict())
+        
+        # Create reranker with materialized model
         reranker = FlagReranker(
             "BAAI/bge-reranker-base",
             use_fp16=False,
-            device="cpu"  # Force CPU
+            device="cpu",
+            model=model  # Use our properly initialized model
         )
-        st.info("✅ Reranker initialized successfully")
+        
+        st.info("✅ Reranker initialized successfully with materialized weights")
         return reranker
     except Exception as e:
         st.warning(f"Failed to initialize reranker: {str(e)}")
