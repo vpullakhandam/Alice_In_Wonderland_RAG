@@ -223,10 +223,21 @@ def rerank_candidates(question: str, candidates: RetrievalResults, top_n: int = 
         ]
         return RerankedResults(results=reranked_docs, original_question=question)
 
-    reranker = FlagReranker("BAAI/bge-reranker-base", use_fp16=False)
-    pairs = [[question, doc.content] for doc in candidates.results]
-    scores = reranker.compute_score(pairs)
-    reranked = sorted(zip(candidates.results, scores), key=lambda x: x[1], reverse=True)
+    try:
+        # Initialize reranker with more robust settings
+        reranker = FlagReranker(
+            "BAAI/bge-reranker-base",
+            use_fp16=False,
+            device="cpu"  # Explicitly use CPU to avoid CUDA/meta tensor issues
+        )
+        pairs = [[question, doc.content] for doc in candidates.results]
+        scores = reranker.compute_score(pairs)
+        reranked = sorted(zip(candidates.results, scores), key=lambda x: x[1], reverse=True)
+    except Exception as e:
+        st.warning(f"Reranker initialization failed, falling back to similarity scores. Error: {str(e)}")
+        # Fallback to similarity scores
+        sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
+        reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
     
     seen = set()
     top_docs = []
