@@ -115,19 +115,12 @@ def initialize_reranker():
         return None
         
     try:
-        import torch
-        device = "cuda" if torch.cuda.is_available() else "cpu"
         reranker = FlagReranker(
             "BAAI/bge-reranker-base",
-            use_fp16=False
+            use_fp16=False,
+            device="cpu"
         )
-        # Properly move the model using to_empty if available
-        if hasattr(reranker.model, 'to_empty'):
-            reranker.model = reranker.model.to_empty(device=device)
-            st.info("Using to_empty() for model initialization")
-        else:
-            reranker.model = reranker.model.to(device)
-            st.info("Using standard to() for model initialization")
+        st.info("Reranker initialized on CPU")
         return reranker
     except Exception as e:
         st.warning(f"Failed to initialize reranker: {str(e)}")
@@ -257,9 +250,37 @@ def rerank_candidates(question: str, candidates: RetrievalResults, top_n: int = 
             sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
             reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
         else:
-            pairs = [[question, doc.content] for doc in candidates.results]
-            scores = reranker.compute_score(pairs)
-            reranked = sorted(zip(candidates.results, scores), key=lambda x: x[1], reverse=True)
+            # Prepare clean, bounded-length text pairs to avoid tokenizer/index errors
+            clean_question = (question or "").strip()
+            if not clean_question:
+                sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
+                reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
+            else:
+                def sanitize_text(text: str, max_chars: int) -> str:
+                    if not text:
+                        return ""
+                    compact = " ".join(text.split())
+                    return compact[:max_chars]
+
+                pairs = []
+                kept_docs = []
+                for doc in candidates.results:
+                    content = (doc.content or "").strip()
+                    if not content:
+                        continue
+                    q_part = sanitize_text(clean_question, 512)
+                    d_part = sanitize_text(content, 4096)
+                    if not q_part or not d_part:
+                        continue
+                    pairs.append([q_part, d_part])
+                    kept_docs.append(doc)
+
+                if not pairs:
+                    sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
+                    reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
+                else:
+                    scores = reranker.compute_score(pairs, batch_size=8)
+                    reranked = sorted(zip(kept_docs, scores), key=lambda x: x[1], reverse=True)
     except Exception as e:
         st.warning(f"Reranker computation failed, falling back to similarity scores. Error: {str(e)}")
         # Fallback to similarity scores
