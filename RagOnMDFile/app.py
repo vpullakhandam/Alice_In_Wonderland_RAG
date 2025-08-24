@@ -421,7 +421,7 @@ def main():
         for ex in examples:
             if st.button(ex):
                 st.session_state.user_query = ex
-                st.experimental_rerun()  # For compatibility with older Streamlit versions
+                st.rerun()  # Rerun the app with the new query
 
     # Main interaction
     query = st.text_input(
