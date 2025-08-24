@@ -109,6 +109,31 @@ def check_api_key():
     return True
 
 @st.cache_resource
+def initialize_reranker():
+    """Initialize the reranker model with proper error handling."""
+    if FlagReranker is None:
+        return None
+        
+    try:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        reranker = FlagReranker(
+            "BAAI/bge-reranker-base",
+            use_fp16=False
+        )
+        # Properly move the model using to_empty if available
+        if hasattr(reranker.model, 'to_empty'):
+            reranker.model = reranker.model.to_empty(device=device)
+            st.info("Using to_empty() for model initialization")
+        else:
+            reranker.model = reranker.model.to(device)
+            st.info("Using standard to() for model initialization")
+        return reranker
+    except Exception as e:
+        st.warning(f"Failed to initialize reranker: {str(e)}")
+        return None
+
+@st.cache_resource
 def load_vectordb():
     """Load the persisted Chroma DB built in the notebook using BGE embeddings."""
     try:
@@ -223,18 +248,20 @@ def rerank_candidates(question: str, candidates: RetrievalResults, top_n: int = 
         ]
         return RerankedResults(results=reranked_docs, original_question=question)
 
+    # Get cached reranker instance
+    reranker = initialize_reranker()
     try:
-        # Initialize reranker with more robust settings
-        reranker = FlagReranker(
-            "BAAI/bge-reranker-base",
-            use_fp16=False,
-            device="cpu"  # Explicitly use CPU to avoid CUDA/meta tensor issues
-        )
-        pairs = [[question, doc.content] for doc in candidates.results]
-        scores = reranker.compute_score(pairs)
-        reranked = sorted(zip(candidates.results, scores), key=lambda x: x[1], reverse=True)
+        if reranker is None:
+            st.warning("Reranker not available, falling back to similarity scores.")
+            # Fallback to similarity scores
+            sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
+            reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
+        else:
+            pairs = [[question, doc.content] for doc in candidates.results]
+            scores = reranker.compute_score(pairs)
+            reranked = sorted(zip(candidates.results, scores), key=lambda x: x[1], reverse=True)
     except Exception as e:
-        st.warning(f"Reranker initialization failed, falling back to similarity scores. Error: {str(e)}")
+        st.warning(f"Reranker computation failed, falling back to similarity scores. Error: {str(e)}")
         # Fallback to similarity scores
         sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
         reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
