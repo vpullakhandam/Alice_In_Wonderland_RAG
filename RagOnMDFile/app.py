@@ -363,23 +363,19 @@ def get_answer(
         )
 
         # 1. Query Expansion
-        st.write("🔄 Generating query variations...")
         expansions = expand_queries(llm_gemini, query, n=4)
         queries = [query] + expansions
-        st.write(f"Generated {len(expansions)} variations")
 
         # 2. Initial Retrieval
-        st.write("🔍 Searching knowledge base...")
         candidates = retrieve_candidates(vectordb, queries, per_query_k=per_query_k)
         if not candidates.results:
             return GeminiResponse(
                 answer="I couldn't find any relevant information in the book about that. Could you try rephrasing your question?",
                 citations=[]
             )
-        st.write(f"Found {len(candidates.results)} initial matches")
 
         # 3. Reranking
-        st.write("🔍 Finding most relevant passages...")
+        # Rerank or use similarity scores
         if use_reranker and candidates.results:
             top_docs = rerank_candidates(query, candidates, top_n=min(final_top_n, len(candidates.results)))
         else:
@@ -396,10 +392,9 @@ def get_answer(
 
         if not top_docs.results:
             return GeminiResponse(
-                answer="I found some matches but couldn't rank them properly. Could you try being more specific?",
+                answer="I couldn't find enough relevant information. Could you try rephrasing your question?",
                 citations=[]
             )
-        st.write(f"Selected top {len(top_docs.results)} relevant passages")
 
         # 4. Context Building
         context, citations = build_context(top_docs)
@@ -429,7 +424,6 @@ def get_answer(
         )
 
         # 5. Final Answer Generation
-        st.write("💭 Generating answer...")
         chat = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             temperature=0.2,  # Lower temperature for more focused answers
@@ -509,15 +503,13 @@ def main():
     )
 
     if query:
-        with st.spinner("Thinking..."):
+        with st.spinner("Finding answer..."):
             response = get_answer(
                 vectordb,
                 query,
                 use_reranker=True,  # Always use reranker
                 final_top_n=8,  # Fixed at 8 chunks
             )
-        st.markdown("### Question")
-        st.write(query)
         st.markdown("### Answer")
         st.write(response.answer)
 
