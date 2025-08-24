@@ -109,18 +109,22 @@ def check_api_key():
     return True
 
 @st.cache_resource
-def initialize_reranker():
-    """Initialize the reranker model with proper error handling."""
+def get_reranker():
+    """Get or initialize reranker with proper error handling."""
     if FlagReranker is None:
         return None
-        
     try:
+        import torch
+        # Force CPU to avoid CUDA/meta tensor issues
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        torch.set_grad_enabled(False)
+        
         reranker = FlagReranker(
             "BAAI/bge-reranker-base",
             use_fp16=False,
-            device="cpu"
+            device="cpu"  # Force CPU
         )
-        st.info("Reranker initialized on CPU")
+        st.info("✅ Reranker initialized successfully")
         return reranker
     except Exception as e:
         st.warning(f"Failed to initialize reranker: {str(e)}")
@@ -229,7 +233,10 @@ def retrieve_candidates(vectordb, queries, per_query_k: int = 5) -> RetrievalRes
 
 def rerank_candidates(question: str, candidates: RetrievalResults, top_n: int = 5) -> RerankedResults:
     """Rerank candidates with structured output."""
-    if FlagReranker is None:
+    # Get cached reranker
+    reranker = get_reranker()
+    
+    if reranker is None:
         # Fallback: use ANN scores (ascending cosine distance)
         sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
         reranked_docs = [
@@ -241,68 +248,59 @@ def rerank_candidates(question: str, candidates: RetrievalResults, top_n: int = 
         ]
         return RerankedResults(results=reranked_docs, original_question=question)
 
-    # Get cached reranker instance
-    reranker = initialize_reranker()
     try:
-        if reranker is None:
-            st.warning("Reranker not available, falling back to similarity scores.")
-            # Fallback to similarity scores
-            sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
-            reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
-        else:
-            # Prepare clean, bounded-length text pairs to avoid tokenizer/index errors
-            clean_question = (question or "").strip()
-            if not clean_question:
-                sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
-                reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
-            else:
-                def sanitize_text(text: str, max_chars: int) -> str:
-                    if not text:
-                        return ""
-                    compact = " ".join(text.split())
-                    return compact[:max_chars]
-
-                pairs = []
-                kept_docs = []
-                for doc in candidates.results:
-                    content = (doc.content or "").strip()
-                    if not content:
-                        continue
-                    q_part = sanitize_text(clean_question, 512)
-                    d_part = sanitize_text(content, 4096)
-                    if not q_part or not d_part:
-                        continue
-                    pairs.append([q_part, d_part])
-                    kept_docs.append(doc)
-
-                if not pairs:
-                    sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
-                    reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
-                else:
-                    scores = reranker.compute_score(pairs, batch_size=8)
-                    reranked = sorted(zip(kept_docs, scores), key=lambda x: x[1], reverse=True)
+        # Clean and validate inputs
+        pairs = []
+        valid_docs = []
+        
+        for doc in candidates.results:
+            if not doc.content or not question:
+                continue
+            # Clean and truncate text
+            doc_text = " ".join(doc.content.split())[:4096]  # Limit doc length
+            q_text = " ".join(question.split())[:512]  # Limit query length
+            if len(doc_text) < 10 or len(q_text) < 3:  # Skip very short texts
+                continue
+            pairs.append([q_text, doc_text])
+            valid_docs.append(doc)
+        
+        if not pairs:
+            raise ValueError("No valid text pairs for reranking")
+            
+        # Process in small batches
+        scores = reranker.compute_score(pairs, batch_size=4)
+        reranked = sorted(zip(valid_docs, scores), key=lambda x: x[1], reverse=True)
+        
+        # Build final results
+        seen = set()
+        top_docs = []
+        for doc, rerank_score in reranked:
+            sid = doc.metadata.position
+            if sid not in seen:
+                seen.add(sid)
+                reranked_doc = RerankedDocument(
+                    content=doc.content,
+                    metadata=doc.metadata,
+                    rerank_score=float(rerank_score)
+                )
+                top_docs.append(reranked_doc)
+            if len(top_docs) == top_n:
+                break
+        
+        return RerankedResults(results=top_docs, original_question=question)
+        
     except Exception as e:
-        st.warning(f"Reranker computation failed, falling back to similarity scores. Error: {str(e)}")
+        st.warning(f"Reranking failed, falling back to similarity scores. Error: {str(e)}")
         # Fallback to similarity scores
         sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
-        reranked = [(doc, float(doc.score)) for doc in sorted_candidates]
-    
-    seen = set()
-    top_docs = []
-    for doc, rerank_score in reranked:
-        sid = doc.metadata.position
-        if sid not in seen:
-            seen.add(sid)
-            reranked_doc = RerankedDocument(
+        reranked_docs = [
+            RerankedDocument(
                 content=doc.content,
                 metadata=doc.metadata,
-                rerank_score=float(rerank_score)
-            )
-            top_docs.append(reranked_doc)
-        if len(top_docs) == top_n:
-            break
-    
-    return RerankedResults(results=top_docs, original_question=question)
+                rerank_score=float(doc.score)
+            ) for doc in sorted_candidates[:top_n]
+        ]
+        return RerankedResults(results=reranked_docs, original_question=question)
 
 def build_context(docs: RerankedResults) -> tuple[str, List[Citation]]:
     """Build context with structured output."""
@@ -480,7 +478,7 @@ def main():
         for ex in examples:
             if st.button(ex):
                 st.session_state.user_query = ex
-                st.rerun()  # Rerun the app with the new query
+                st.rerun()  # Use the new st.rerun() instead of experimental_rerun
 
     # Main interaction
     query = st.text_input(
