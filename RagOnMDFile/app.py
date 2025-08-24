@@ -140,11 +140,8 @@ def get_reranker():
             device="cpu",
             model=model  # Use our properly initialized model
         )
-        
-        st.info("✅ Reranker initialized successfully with materialized weights")
         return reranker
-    except Exception as e:
-        st.warning(f"Failed to initialize reranker: {str(e)}")
+    except Exception:
         return None
 
 @st.cache_resource
@@ -250,20 +247,24 @@ def retrieve_candidates(vectordb, queries, per_query_k: int = 5) -> RetrievalRes
 
 def rerank_candidates(question: str, candidates: RetrievalResults, top_n: int = 5) -> RerankedResults:
     """Rerank candidates with structured output."""
-    # Get cached reranker
     reranker = get_reranker()
     
-    if reranker is None:
-        # Fallback: use ANN scores (ascending cosine distance)
+    def get_similarity_ranked_docs():
+        """Helper to get similarity-score ranked documents."""
         sorted_candidates = sorted(candidates.results, key=lambda x: x.score)
-        reranked_docs = [
+        return [
             RerankedDocument(
                 content=doc.content,
                 metadata=doc.metadata,
                 rerank_score=float(doc.score)
             ) for doc in sorted_candidates[:top_n]
         ]
-        return RerankedResults(results=reranked_docs, original_question=question)
+    
+    if reranker is None:
+        return RerankedResults(
+            results=get_similarity_ranked_docs(),
+            original_question=question
+        )
 
     try:
         # Clean and validate inputs
@@ -282,7 +283,10 @@ def rerank_candidates(question: str, candidates: RetrievalResults, top_n: int = 
             valid_docs.append(doc)
         
         if not pairs:
-            raise ValueError("No valid text pairs for reranking")
+            return RerankedResults(
+                results=get_similarity_ranked_docs(),
+                original_question=question
+            )
             
         # Process in small batches
         scores = reranker.compute_score(pairs, batch_size=4)
@@ -375,7 +379,7 @@ def get_answer(
         st.write(f"Found {len(candidates.results)} initial matches")
 
         # 3. Reranking
-        st.write("📊 Reranking results...")
+        st.write("🔍 Finding most relevant passages...")
         if use_reranker and candidates.results:
             top_docs = rerank_candidates(query, candidates, top_n=min(final_top_n, len(candidates.results)))
         else:
