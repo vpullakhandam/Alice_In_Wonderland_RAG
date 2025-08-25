@@ -85,8 +85,8 @@ st.set_page_config(
 )
 
 # Constants
-PERSIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "chroma_store"))
-COLLECTION = "alice"  # Make sure this matches the collection name from notebook.ipynb
+PERSIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "chroma_store"))
+COLLECTION = "alice"  # Collection name from the notebook
 
 def get_api_key_from_secrets() -> str:
     return st.secrets.get("GEMINI_API_KEY", "")
