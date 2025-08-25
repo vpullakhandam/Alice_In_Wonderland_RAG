@@ -113,6 +113,3 @@ Alice_In_Wonderland_RAG/
    - The app is optimized for Streamlit Cloud's free tier
    - Reduce batch sizes if needed
 
-## License
-
-MIT License - feel free to use and modify!
