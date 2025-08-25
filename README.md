@@ -1,14 +1,17 @@
 # Alice in Wonderland Q&A
 
-A Streamlit application that uses RAG (Retrieval Augmented Generation) to answer questions about Alice in Wonderland.
+A Streamlit application that uses RAG (Retrieval Augmented Generation) to answer questions about Alice in Wonderland. The application implements robust data validation and structured outputs using Pydantic models.
 
 ## Features
 
 - Question answering grounded in the original text
-- Query expansion for better search results
-- Reranking of retrieved passages
+- Query expansion for better search results using Gemini
+- Reranking of retrieved passages with BAAI/bge-reranker-base
 - Source citations for transparency
 - Interactive UI with sample questions
+- Structured data validation with Pydantic models
+- Multi-query expansion with JSON schema enforcement
+- Token-aware text chunking with metadata preservation
 
 ## Project Structure
 
@@ -23,6 +26,17 @@ Alice_In_Wonderland_RAG/
 ├── .streamlit/        # Streamlit configuration
 └── requirements.txt    # Python dependencies
 ```
+
+## Data Models
+
+The project uses Pydantic models for data validation and structure:
+
+- `ChunkMetadata`: Validates chunk metadata (source, chapter info, position)
+- `ChunkDoc`: Represents a document chunk with content and metadata
+- `Expansions`: Validates query expansion results
+- `RetrievedChunk`: Structures retrieved passages with scores
+- `RerankedDocument`: Represents reranked documents with scores
+- `GeminiResponse`: Structures final answers with citations
 
 ## Setup for Local Development
 
@@ -51,6 +65,8 @@ Alice_In_Wonderland_RAG/
    - Create a `.env` file with:
      ```
      GEMINI_API_KEY=your_api_key_here
+     OPENROUTER_API_KEY=your_openrouter_key_here
+     HUGGINGFACE_TOKEN=your_huggingface_token_here
      ```
    - Or set in Streamlit Cloud secrets
 
@@ -75,27 +91,55 @@ Alice_In_Wonderland_RAG/
 
    - In your app's settings on Streamlit Cloud
    - Go to "Secrets"
-   - Add your `GEMINI_API_KEY`
+   - Add your API keys:
+     - `GEMINI_API_KEY`
+     - `OPENROUTER_API_KEY`
+     - `HUGGINGFACE_TOKEN`
 
 4. Advanced Settings:
    - Python version: 3.10
    - Packages: requirements.txt will be automatically detected
 
+## Technical Implementation
+
+- **Text Processing**:
+
+  - Token-aware text chunking with position tracking
+  - Chapter metadata extraction and preservation
+  - Structured chunk summarization using OpenRouter's GPT models
+
+- **Embeddings & Retrieval**:
+
+  - BGE base embeddings (BAAI/bge-base-en-v1.5)
+  - Persistent Chroma vectorstore with cosine similarity
+  - Multi-query expansion using Gemini
+  - Cross-encoder reranking with BAAI/bge-reranker-base
+
+- **Answer Generation**:
+  - Gemini 2.5 Flash for final answer generation
+  - Structured output with source citations
+  - JSON schema enforcement for consistent responses
+
 ## Dependencies
 
 - Python 3.10+
 - Streamlit
-- LangChain
+- LangChain & LangChain Community
 - ChromaDB
 - Google Gemini API
+- Pydantic
+- OpenRouter API
+- Hugging Face Transformers
 - See requirements.txt for full list
 
 ## Notes
 
 - The knowledge base is built from the original text using BGE embeddings
-- Uses Gemini for answer generation
+- Uses Gemini for answer generation and query expansion
 - Includes cross-encoder reranking for better results
 - SQLite compatibility layer for Streamlit Cloud deployment
+- Robust data validation with Pydantic models
+- Structured JSON outputs for consistency
 
 ## Troubleshooting
 
@@ -110,6 +154,11 @@ Alice_In_Wonderland_RAG/
    - Ensure all binary files are included
 
 3. If you get memory errors:
+
    - The app is optimized for Streamlit Cloud's free tier
    - Reduce batch sizes if needed
 
+4. If you encounter API authentication issues:
+   - Verify all required API keys are properly set in .env or Streamlit secrets
+   - Check API key permissions and quotas
+   - Ensure environment variables are properly loaded
