@@ -148,15 +148,12 @@ def get_reranker():
 def load_vectordb():
     """Load the persisted Chroma DB built in the notebook using BGE embeddings."""
     try:
-        sqlite_path = os.path.join(PERSIST_DIR, "chroma.sqlite3")
-        if not os.path.isdir(PERSIST_DIR) or not os.path.exists(sqlite_path):
-            st.error("Chroma store not found. Run the notebook to build 'chroma_store/'.")
-            return None
+        # Using in-memory database, no need to check for file existence
         embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-base-en-v1.5")
         vectordb = ChromaStore(
             embedding_function=embeddings,
-            persist_directory=PERSIST_DIR,
             collection_name=COLLECTION,
+            persist_directory=":memory:"  # Use in-memory SQLite database
         )
         if CHROMA_DEPRECATED:
             st.warning("Using deprecated Chroma import from langchain_community. Consider installing 'langchain-chroma' and switching to the new import.")
